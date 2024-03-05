@@ -1,6 +1,13 @@
 import streamlit as st
 import requests
 from datetime import datetime,timedelta
+hide_menu="""
+<style>
+#MainMenu {
+    visibility:hidden;
+}
+</style>
+"""
 
 #Error message from flowise
 cqa_senario_invalid_response="Could you please provide more"
@@ -55,6 +62,7 @@ def calling_flowise_api(question):
         return response.json()
     else:
         #st.session_state.waiting_for_input = False
+        st.error("Error with accessing the server. Please contact your mentor")
         return "Error with accessing the server. Please contact your mentor"
     
 def validate_stockholder_selection(response,user_data):
@@ -99,10 +107,10 @@ def step_2(): #Getting Senario from the user
             if(api_response!="Error with accessing the server. Please contact your mentor"):
                 st.session_state.stockholder_option=api_response
                 st.session_state.stage=3
+                st.session_state.conversation_history = api_response# += f"Bot: {api_response}\n"
+                st.rerun()
             else:
-                print(api_response)
-            st.session_state.conversation_history = api_response# += f"Bot: {api_response}\n"
-            st.rerun()
+                print(api_response)      
     return True
 
 def step_3(): #getting Stockholder from the user
@@ -119,7 +127,7 @@ def step_3(): #getting Stockholder from the user
     if col2.button(" Send"):
         if user_input.strip() != "":
             check= validate_stockholder_selection(st.session_state.conversation_history,user_input)
-            st.success(check)
+            #st.success(check)
             if(check == -1):
                 st.success("Please select the valid stockholder")
                 return True
@@ -137,7 +145,7 @@ def step_4(): #Getting Question Type from the user
     if col2.button("Proceed"):
         final_question= "Generate 5 "+ st.session_state.question_type +" question for"+ st.session_state.stockholder
         api_response=calling_flowise_api(final_question)
-        st.success(api_response)
+        #st.success(api_response)
         if(api_response!="Error with accessing the server. Please contact your mentor"):
             st.session_state.stage=5
             #st.session_state.conversation_history += f"You: {user_input}\n"
@@ -161,20 +169,26 @@ def step_6(): #Next action item?
     match st.session_state.next_action_item:
         case "More Questions Of The Above":
             more_question()
+            st.session_state.next_action_item = "Completed"
             return True
         case "Question Of Another Type":
             st.session_state.stage=4
+            st.session_state.next_action_item = "Completed"
             st.rerun()
             return True
         case "I want to try with another stakeholder":
             st.session_state.stage=3
+            st.session_state.next_action_item = "Completed"
             st.rerun()
             return True
         case "I am clear. Thanks":
             get_query_parameters()
+            st.session_state.next_action_item = "all the best"
             create_task();
             all_the_best()
-            
+            return True
+        case "all the best":
+            all_the_best()
             return True
     return True
 def more_question(): #getting more question
@@ -210,7 +224,7 @@ def create_task(): #create task in the spearker environment
     "assigned_by": ""+st.session_state.user_name+""
     }
     task_final_url=task_create_api_URL #+"&name="+task_name+"&title="+task_title+"&description="+update_task_details()+"&type="+task_type+"&assignee_type="+task_assignee_type+"&assigned_to="+task_assigned_to+"&expires_at="+get_current_date()+"&assigned_by="+task_assigned_by
-    #print(data)
+    print(data)
     response = requests.post(task_create_api_URL,data)
     if response.status_code == 200:
         st.session_state.waiting_for_input = False
@@ -223,6 +237,7 @@ def create_task(): #create task in the spearker environment
     return True
 # Define the Streamlit UI layout
 def main():
+    st.markdown(hide_menu,unsafe_allow_html=True)
     get_query_parameters() # get the user id and name from the URL
     
     # for storing the details in session state(local storage)
