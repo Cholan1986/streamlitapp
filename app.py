@@ -1,9 +1,10 @@
 import streamlit as st
 import requests
 from datetime import datetime,timedelta
-import openai
+from openai import OpenAI
 import json
 import re
+from prompts import PROMPT_TEXT
 import os
 
 hide_menu="""
@@ -37,23 +38,24 @@ def remove_markdown(text):
     return text
 
 def load_config_value():
-    # Load JSON file
+    # Load environment variable from .env and store it in system variable
     with open('config.json', 'r') as f:
         config = json.load(f)
     st.session_state.app_title= config.get('title')
-    st.session_state.api_key= os.environ.get('api_key')
     st.session_state.cqa_prompt=config.get('cqa_prompt')
     st.session_state.gpt_model=config.get('gpt_model')
     st.session_state.create_task_url=config.get('create_task_url')
+    st.session_state.api_key=os.environ.get('api_key')
     return True
 def open_ai_api(prompts):
-    completion = openai.ChatCompletion.create(
+    openai_instant = OpenAI(api_key=st.session_state.api_key)
+    completion = openai_instant.chat.completions.create(
     # Use GPT 3.5 as the LLM
     model=st.session_state.gpt_model,
     # Pre-define conversation messages for the possible roles
     messages=[
-        {"role":"system","content":st.session_state.cqa_prompt},
-    #    {"role": "user", "content": prompts}
+        {"role":"system","content":PROMPT_TEXT},
+        {"role": "user", "content": prompts}
     ]
     )
     #print(completion)
@@ -87,7 +89,7 @@ def step_1(): #welcome message and video screen
     st.title(st.session_state.app_title)
     st.markdown("---")
     st.write("Hi I am your CQA Agent")
-    st.video("cqa_video.mp4","video/mp4")
+    st.video("/home/forge/ai-apps.magiqspark.com/cqa_bot/cqa_video.mp4","video/mp4")
     st.write("Saw the video? Shall we proceed?")
     col1,col2,col3 = st.columns([2,2,6])     
     if col1.button("Yes"):
@@ -100,7 +102,7 @@ def step_1(): #welcome message and video screen
         st.success("Ok.. Please watch the video. once you are done. click 'Yes' to proceed with CQA")
     return True
 def step_2(): #Getting Senario from the user
-    st.title("TinyMagiq CQA Bot Sample")
+    st.title(st.session_state.app_title)
     st.markdown("---")
     st.subheader("What scenario do you need help with to get questions?")
     
@@ -120,7 +122,7 @@ def step_2(): #Getting Senario from the user
     return True
 
 def step_3(): #getting stackholder from the user
-    st.title("TinyMagiq CQA Bot Sample")
+    st.title(st.session_state.app_title)
     st.markdown("---")    
     st.subheader("Please select the stack holder:")
     cleaned_text = remove_markdown(st.session_state.stackholder_option)
@@ -133,9 +135,7 @@ def step_3(): #getting stackholder from the user
         for key, value in parsed_mappings.items():
             if value == selected_stakeholder:
                 st.session_state.stackholder = value
-                #st.write("Selected Stakeholder:", key)
-                #st.write("Description:", value)
-    
+   
     col1,col2 = st.columns([3,7])
     if col2.button(" Send"):
         st.session_state.stage=4
@@ -214,28 +214,31 @@ def all_the_best(): #GoodBye screen
           
     return True
 def create_task(): #create task in the spearker environment
-    task_title="CQA:"+st.session_state.cqa_senario
-    data = {
-    "name": "Do CQA",
-    "title": ""+task_title+"",
-    "description": ""+update_task_details()+"",
-    "type": "simple",
-    "assignee_type": "user",
-    "assigned_to": ""+st.session_state.user_id+"",
-    "expires_at": ""+get_current_date()+"",
-    "assigned_by": ""+st.session_state.user_name+""
-    }
-    response = requests.post(st.session_state.create_task_url,data)
-    if response.status_code == 200:
-        st.session_state.waiting_for_input = False
-        st.success(response.json())
-        return response.json()
-    else:
-        st.success("Error creating task")
-        st.session_state.waiting_for_input = False
-        return "Error with accessing the server. Please contact your mentor"
+    try:
+        task_title="CQA:"+st.session_state.cqa_senario
+        data = {
+        "name": "Do CQA",
+        "title": ""+task_title+"",
+        "description": ""+update_task_details()+"",
+        "type": "simple",
+        "assignee_type": "user",
+        "assigned_to": ""+st.session_state.user_id+"",
+        "expires_at": ""+get_current_date()+"",
+        "assigned_by": ""+st.session_state.user_name+""
+        }
+        response = requests.post(st.session_state.create_task_url,data)
+        if response.status_code == 200:
+            st.session_state.waiting_for_input = False
+            st.success(response.json())
+            return response.json()
+        else:
+            st.success("Error creating task")
+            st.session_state.waiting_for_input = False
+            return "Error with accessing the server. Please contact your mentor"
+    except Exception as e:
+        st.error("Error creating the task. Please reach your mentor for further assistants")
     return True
-def parse_input_content(content): #for mapping the stackholders response from the openai
+def parse_input_content(content): #for mapping the stackholders response coming from the openai
     lines = content.split('\n')
     mappings = {}
     stakeholders_started = True
@@ -256,9 +259,7 @@ def get_selection_from_input(user_input, mappings): #For validating stackholder 
 # Define the Streamlit UI layout
 def main():
     st.markdown(hide_menu,unsafe_allow_html=True)
-
-    #get_query_parameters() # get the user id and name from the URL
-    
+   
     # for storing the details in session state(local storage)
     if "cqa_senario" not in st.session_state:
         st.session_state.cqa_senario=""
@@ -286,12 +287,10 @@ def main():
         st.session_state.gpt_model=""
     if "create_task_url" not in st.session_state:
         st.session_state.create_task_url=""
-    if "cqa_prompt" not in st.session_state:
-        st.session_state.cqa_prompt=""
     
     if "api_key" not in st.session_state:
         load_config_value()
-    openai.api_key = st.session_state.api_key
+    
     match st.session_state.stage:
         case 1:
              step_1()
@@ -310,3 +309,4 @@ def main():
 # Run the Streamlit app
 if __name__ == "__main__":
     main()
+
