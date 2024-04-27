@@ -34,9 +34,9 @@ def authenticate(username, password):
 def load_config_value():
     # Load environment variable from .env and store it in system variable
     load_dotenv()
-    st.session_state.app_title= "ARInspector"#os.environ.get("TITLE")
+    st.session_state.app_title= os.environ.get("TITLE")
     st.session_state.api_key=os.environ.get("OPENAI_API_KEY")
-    st.session_state.gpt_model="gpt-4-vision-preview" #os.environ.get("GPT_MODEL")
+    st.session_state.gpt_model=os.environ.get("GPT_MODEL")
     return True
 
 class VideoTransformer(VideoTransformerBase):
