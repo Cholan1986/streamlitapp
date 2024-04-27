@@ -1,290 +1,305 @@
 import streamlit as st
+import cv2
+from streamlit_webrtc import WebRtcMode,VideoTransformerBase, webrtc_streamer
+from streamlit_drawable_canvas import st_canvas
+from PIL import Image
+import base64
+from openai import OpenAI
 import requests
-from datetime import datetime,timedelta
+from prompts import PROMPT_TEXT
+import json
+from dotenv import load_dotenv
+import os
+from io import BytesIO
+
+with open('configs.json', 'r') as f:
+    config = json.load(f)
+# For hidding the menu bar in the screen
 hide_menu="""
 <style>
 #MainMenu {
     visibility:hidden;
 }
+
 </style>
 """
 
-#Error message from flowise
-cqa_senario_invalid_response="Could you please provide more"
-stockholder_invalid_response="Could you please select a stakeholder from the given list"
+# Authenticate user
+def authenticate(username, password):
+    users= config.get("users")
+    if username in users and users[username] == password:
+        return True
+    return False
 
-
-#Task Details
-task_create_api_URL="https://services.magiqspark.com/api/system/tasks/create?token=rekraps"
-task_name="Do CQA"
-task_title=""
-task_description=""
-task_type="CQA"
-task_assignee_type="User"
-task_assigned_to=""
-task_expires_at=""
-task_assigned_by="Kumaran(CQA Bot)"
-
-def update_task_details(): #Append task details to share it to the sparker app as task description
-    task_desc="CQA senariou:"+st.session_state.cqa_senario+"\n"
-    #task_desc+="stockholder:"+st.session_state.stockholder+"\n"
-    description_content= st.session_state.conversation_history
-    description_content=str(description_content).replace('"',"'")
-    print(description_content)
-    task_desc+="Questions:"+ description_content
-
-    return task_desc
-def get_current_date(): # get the current date and add 4 days to calculate the expire date
-    # Get current date
-    current_date = datetime.now().date()
-    # Add 4 days to the current date
-    result_date = current_date + timedelta(days=4)
-    formatted_date = result_date.strftime("%Y-%m-%d")
-    return formatted_date
-
-def get_query_parameters(): #get the user id and user name from URL
-    query_params = st.query_params
-    st.session_state.user_id = query_params.get("id")
-    st.session_state.user_name = query_params.get("name")
-    print(st.session_state.user_name+"---"+st.session_state.user_id)
+def load_config_value():
+    # Load environment variable from .env and store it in system variable
+    load_dotenv()
+    st.session_state.app_title= "ARInspector"#os.environ.get("TITLE")
+    st.session_state.api_key=os.environ.get("OPENAI_API_KEY")
+    st.session_state.gpt_model="gpt-4-vision-preview" #os.environ.get("GPT_MODEL")
     return True
 
-def calling_flowise_api(question):
-    api_response=""
-    #st.session_state.waiting_for_input = True
-    url = 'https://ai-dev.magiqspark.com/api/v1/prediction/5a9b8a7b-0558-4d86-bc24-8e110187f673'
-    body = {
-        "question": question 
-    }
-    response = requests.post(url, json=body)
-    if response.status_code == 200:
-        #st.session_state.waiting_for_input = False
-        return response.json()
-    else:
-        #st.session_state.waiting_for_input = False
-        st.error("Error with accessing the server. Please contact your mentor")
-        return "Error with accessing the server. Please contact your mentor"
-    
-def validate_stockholder_selection(response,user_data):
-    output=response.find(user_data)
-    #print(output)
-    return output
-def step_1(): #welcome message and video screen
-    #print("step_1")
-    st.title("TinyMagiq CQA Bot Sample")
-    st.markdown("---")
-    conversation_history_placeholder = st.empty()
-    st.write("Hi I am your CQA Agent")
-    st.video("cqa_video.mp4","video/mp4")
-    st.write("Saw the video? Shall we proceed?")
-    col1,col2,col3 = st.columns([2,2,6])
-        
-    if col1.button("Yes"):
-        # Proceed with next step
-        st.write("Yes user input...")
-        st.session_state.stage =2
-        st.rerun()
-    if col2.button("No"):
-        # Proceed with next step
-        st.write("No user input...")
-        st.session_state.stage =2
-        st.rerun()
-    return True
-def step_2(): #Getting Senario from the user
-    #print("step_2")
-    st.title("TinyMagiq CQA Bot Sample")
-    st.markdown("---")
-    conversation_history_placeholder = st.empty()
-    st.subheader("What scenario do you need help with to get questions?")
-    #conversation_history = conversation_history_placeholder.text_area("CQA Bot:", value="What scenario do you need help with to get questions?", height=50,disabled=True)
-    col1,col2 = st.columns([9,1])
-    user_input = col1.text_input("You:"," ")
-    st.session_state.cqa_senario = user_input
-    col2.write("")
-    if col2.button("Send"):
-        if user_input.strip() != "":
-            api_response=calling_flowise_api(st.session_state.cqa_senario+"Who are stakeholders")
-            if(api_response!="Error with accessing the server. Please contact your mentor"):
-                st.session_state.stockholder_option=api_response
-                st.session_state.stage=3
-                st.session_state.conversation_history = api_response# += f"Bot: {api_response}\n"
-                st.rerun()
-            else:
-                print(api_response)      
-    return True
+class VideoTransformer(VideoTransformerBase):
+    def __init__(self):
+        self._last_frame = None
 
-def step_3(): #getting Stockholder from the user
-    #print("step_3")
-    st.title("TinyMagiq CQA Bot Sample")
-    st.markdown("---")
-    
-    st.markdown(st.session_state.stockholder_option, unsafe_allow_html=True)
-    col1,col2 = st.columns([9,1])
-    # Text input for user to type messages
-    user_input = col1.text_input("You:","")
-    col2.write("")
-    
-    if col2.button(" Send"):
-        if user_input.strip() != "":
-            check= validate_stockholder_selection(st.session_state.conversation_history,user_input)
-            #st.success(check)
-            if(check == -1):
-                st.success("Please select the valid stockholder")
-                return True
-            st.session_state.stockholder = user_input
-            st.session_state.stage=4
-            st.rerun()
-    return True
-def step_4(): #Getting Question Type from the user
-    #print("step_4")
-    st.title("TinyMagiq CQA Bot Sample")
-    st.markdown("---")
-    st.session_state.question_type=st.radio("What type of question do you want to ask?  ",["Data","Thoughts","Feeling"])
-    col1,col2 = st.columns([3,7])
-    col2.write("")
-    if col2.button("Proceed"):
-        final_question= "Generate 5 "+ st.session_state.question_type +" question for"+ st.session_state.stockholder
-        api_response=calling_flowise_api(final_question)
-        #st.success(api_response)
-        if(api_response!="Error with accessing the server. Please contact your mentor"):
-            st.session_state.stage=5
-            #st.session_state.conversation_history += f"You: {user_input}\n"
-            st.session_state.conversation_history = api_response# += f"Bot: {api_response}\n"          
-            st.rerun()
-    return True
-def step_5(): #Show the result and Exit
-    #print("step_5")
-    st.title("TinyMagiq CQA Bot Sample")
-    st.markdown("---")
-    st.markdown(st.session_state.conversation_history, unsafe_allow_html=True)
-    st.session_state.next_action_item=st.radio("Are you comfortable with a question to ask?",["More Questions Of The Above","Question Of Another Type","I want to try with another stakeholder","I am clear. Thanks"])
-    col1,col2 = st.columns([3,7])
-    col2.write("")
-    if col2.button("Proceed"):
-        st.session_state.stage=6
-        st.rerun();
-    return True
-def step_6(): #Next action item?
-    #print("step_6")
-    match st.session_state.next_action_item:
-        case "More Questions Of The Above":
-            more_question()
-            st.session_state.next_action_item = "Completed"
-            return True
-        case "Question Of Another Type":
-            st.session_state.stage=4
-            st.session_state.next_action_item = "Completed"
-            st.rerun()
-            return True
-        case "I want to try with another stakeholder":
-            st.session_state.stage=3
-            st.session_state.next_action_item = "Completed"
-            st.rerun()
-            return True
-        case "I am clear. Thanks":
-            get_query_parameters()
-            st.session_state.next_action_item = "all the best"
-            create_task();
-            all_the_best()
-            return True
-        case "all the best":
-            all_the_best()
-            return True
-    return True
-def more_question(): #getting more question
-    final_question= "Generate 5 "+ st.session_state.question_type +" question for"+ st.session_state.stockholder
-    api_response=calling_flowise_api(final_question)
-    if(api_response!="Error with accessing the server. Please contact your mentor"):
-        st.session_state.stage=5
-        st.session_state.conversation_history = api_response# += f"Bot: {api_response}\n"          
-        st.rerun()
-    return True
-def all_the_best(): #GoodBuy screen
-    st.title("TinyMagiq CQA Bot Sample")
-    st.markdown("---")
-    st.markdown("*All the best practicing CQA*", unsafe_allow_html=True)
-    st.balloons()
-    col1,col2 = st.columns([3,7])
-    col2.write("")
-    if col2.button(" Proceed "):
-        st.session_state.stage=1;
-        st.rerun()
-          
-    return True
-def create_task(): #create task in the spearker environment
-    task_title="CQA:"+st.session_state.cqa_senario
-    data = {
-    "name": "Do CQA",
-    "title": ""+task_title+"",
-    "description": ""+update_task_details()+"",
-    "type": "simple",
-    "assignee_type": "user",
-    "assigned_to": ""+st.session_state.user_id+"",
-    "expires_at": ""+get_current_date()+"",
-    "assigned_by": ""+st.session_state.user_name+""
-    }
-    task_final_url=task_create_api_URL #+"&name="+task_name+"&title="+task_title+"&description="+update_task_details()+"&type="+task_type+"&assignee_type="+task_assignee_type+"&assigned_to="+task_assigned_to+"&expires_at="+get_current_date()+"&assigned_by="+task_assigned_by
-    print(data)
-    response = requests.post(task_create_api_URL,data)
-    if response.status_code == 200:
-        st.session_state.waiting_for_input = False
-        st.success(response.json())
-        return response.json()
-    else:
-        st.success("Error creating task")
-        st.session_state.waiting_for_input = False
-        return "Error with accessing the server. Please contact your mentor"
-    return True
-# Define the Streamlit UI layout
+    def transform(self, frame):
+        self._last_frame = frame.to_ndarray(format="bgr24")
+        return self._last_frame
+
+def save_image_locally(frame):
+    filename = "captured_image.jpg"
+    cv2.imwrite(filename, cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    st.success(f"Image saved as {filename}")
+    st.session_state.stage =2
+    st.rerun()
+
+def load_camera():
+    # webrtc_ctx = webrtc_streamer(
+    #     key="example",
+    #     video_transformer_factory=VideoTransformer,
+    #     async_transform=True,
+    # )
+    webrtc_ctx = webrtc_streamer(
+        key="arinspector",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration={  # Add this config
+            "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+        },
+        video_transformer_factory=VideoTransformer,
+        #video_frame_callback=video_frame_callback,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
+    if webrtc_ctx.video_transformer:
+        if st.button("Capture Image"):
+            captured_image = webrtc_ctx.video_transformer._last_frame
+            save_image_locally(captured_image)
+
+def merge_images(background_image, foreground_image, x_offset, y_offset, resize):
+    # Open the background image
+    background = Image.open(background_image)
+
+    # Open the transparent PNG image
+    foreground = Image.open(foreground_image)
+
+    # Resize the PNG image if necessary
+    if resize:
+        foreground = foreground.resize((foreground.width // 2, foreground.height // 2))
+
+    # Create a new image with the same size as the background image
+    merged_image = Image.new("RGBA", background.size)
+
+    # Paste the background onto the new image
+    merged_image.paste(background, (0, 0))
+
+    # Paste the PNG image onto the new image with transparency
+    merged_image.paste(foreground, (x_offset, y_offset), mask=foreground)
+
+    return merged_image
+
+# Function to save content to content.py
+def save_content(new_content):
+    try:
+        with open("prompts.py", "w") as file:
+            file.write(new_content)
+    except:
+        print("Error")
+
+def image_to_base64(image):
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
+
 def main():
-    st.markdown(hide_menu,unsafe_allow_html=True)
-    get_query_parameters() # get the user id and name from the URL
-    
     # for storing the details in session state(local storage)
-    if "cqa_senario" not in st.session_state:
-        st.session_state.cqa_senario=""
-    if "stockholder" not in st.session_state:
-        st.session_state.stockholder=""
-    if "stockholder_option" not in st.session_state:
-        st.session_state.stockholder_option=""
-    if "question_type" not in st.session_state:
-        st.session_state.question_type=""
-    if "stage" not in st.session_state:
-        st.session_state.stage =1
-    if "user_id" not in st.session_state:
-        st.session_state.user_id =1
-    if "user_name" not in st.session_state:
-        st.session_state.user_name =1
-    if "conversation_history" not in st.session_state:
-        st.session_state.conversation_history = ""
-    if "waiting_for_input" not in st.session_state:
-        st.session_state.waiting_for_input = False
-    if "next_action_item" not in st.session_state:
-        st.session_state.next_action_item=""
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in=False
+    if "app_title" not in st.session_state:
+        st.session_state.app_title=""
+    if "gpt_model" not in st.session_state:
+        st.session_state.gpt_model=""
+    if "output_filename" not in st.session_state:
+        st.session_state.output_filename=""
+    if "api_key" not in st.session_state:
+        load_config_value()
+    if "prompt" not in st.session_state:
+        st.session_state.prompt=PROMPT_TEXT
+
+    st.markdown(hide_menu,unsafe_allow_html=True)
+    st.title(st.session_state.app_title)
+    st.sidebar.title("Authentication")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    if st.sidebar.button("Login"):
+        if authenticate(username, password):
+            st.session_state.logged_in = True
+        else:
+            st.session_state.logged_in= False
+            st.error("Invaid user")   
+
+    if username == "admin" and st.session_state.logged_in == True:
+        print("admin")
+        updated_content = st.sidebar.text_area("Prompt:",value=st.session_state.prompt,key="textarea",height=200)
+        st.session_state.prompt = updated_content
+        if st.sidebar.button("UpdatePrompt"): 
+            print("update clicked")
+            new_content='PROMPT_TEXT = """'+updated_content+'"""'
+            st.session_state.prompt = updated_content
+            save_content(new_content)
+            st.sidebar.success("Content saved successfully!")
+            #return        
+    elif st.session_state.logged_in == True:
+        print("user")        
+    if st.session_state.logged_in == True:    
+        if "stage" not in st.session_state:
+            st.session_state.stage =1
+        
+        match st.session_state.stage:
+            case 1:
+                st.title("Camera Capture")
+                load_camera()
+                # uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
     
-    match st.session_state.stage:
-        case 1:
-             step_1()
-        case 2:
-             step_2()
-        case 3:
-             step_3()
-        case 4:
-             step_4()
-        case 5:
-             step_5()
-        case 6:
-             step_6()
-        
-    # if(st.session_state.stage==2):
-    #     stage_2()
-    # if(st.session_state.stage==3):
-    #     stage_3()
-    # if(st.session_state.stage==4):
-    #     stage_4()
-    # if(st.session_state.stage==5):
-    #     stage_5()  
-        
-# Run the Streamlit app
+                # if uploaded_file is not None:
+                #     image = Image.open(uploaded_file)
+                #     st.image(image, caption="Uploaded Image", use_column_width=True)
+                    
+                #     base64_str = image_to_base64(image)
+                #     api_call(base64_str)
+                    #st.write("Base64 Representation:")
+                    #st.write(base64_str)
+            case 2:
+                st.title("Image Analyse")         
+                draw_on_image("captured_image.jpg","canva")
+
+# Function to encode the image
+def encode_image(image_path):
+  with open(image_path, "rb") as image_file:
+    return base64.b64encode(image_file.read()).decode('utf-8')
+
+def api_call(): # for calling Chatgpt 4
+
+    # OpenAI API Key
+    api_key = st.session_state.api_key
+    # Path to your image
+    image_path = "final.jpg"
+
+    # Getting the base64 string
+    base64_image = encode_image(image_path)
+
+    headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {api_key}"
+    }
+
+    payload = {
+    "model": "gpt-4-vision-preview",
+    "messages": [
+        {
+        "role": "user",
+        "content": [
+            {
+            "type": "text",
+            "text": PROMPT_TEXT
+            },
+            {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{base64_image}"
+            }
+            }
+        ]
+        }
+    ],
+    "max_tokens": 300
+    }
+
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+    
+    content = response.json()
+    #print(content['choices'][0]['message']['content'])
+    content = response.json()
+    #print(content['choices'][0]['message']['content'])
+    assistant_response = content['choices'][0]['message']['content']
+    print(assistant_response)
+    st.markdown(assistant_response)
+ 
+def api_call_upload(base64_image): # for calling Chatgpt 4
+
+    # OpenAI API Key
+    api_key = st.session_state.api_key
+
+    headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {api_key}"
+    }
+
+    payload = {
+    "model": "gpt-4-vision-preview",
+    "messages": [
+        {
+        "role": "user",
+        "content": [
+            {
+            "type": "text",
+            "text": PROMPT_TEXT
+            },
+            {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{base64_image}"
+            }
+            }
+        ]
+        }
+    ],
+    "max_tokens": 300
+    }
+
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+    
+    content = response.json()
+    #print(content['choices'][0]['message']['content'])
+    assistant_response = content['choices'][0]['message']['content']
+    print(assistant_response)
+    st.markdown(assistant_response)
+ 
+    
+def save_canvas_as_png(canva_result,file_path):
+    # Convert NumPy array to PIL Image
+    drawn_image_pil = Image.fromarray(canva_result)
+    drawn_image_pil = drawn_image_pil.resize((640, 480))
+    # Save the drawn image as PNG
+    drawn_image_pil.save(file_path)
+
+def draw_on_image(image_file,name):
+    captured_frame = Image.open(image_file)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        drawing_mode = 'freedraw' #st.selectbox('Draw',('rect','point','freedraw'))
+    with col2:
+        stroke_color = 'rgb(0, 0, 255)' #st.color_picker('Stroke Color HEX: ')
+    # #RGBimg = st.file_uploader('Select Image', type=['png','jpg'], key='dset_fu1', accept_multiple_files=False)
+    fill_color = 'rgba(255,165,0,0.3)'
+    canvas_result = st_canvas(fill_color=fill_color, stroke_width=3, stroke_color=stroke_color, background_color='#000000', background_image=captured_frame if captured_frame else None, update_streamlit=True, height=400, drawing_mode=drawing_mode, point_display_radius = 5 if drawing_mode=='point' else 0, key='canvas')
+    
+    if st.button("Analyse"):
+        # Merge drawing with the captured image
+        if canvas_result.image_data is not None:
+            save_canvas_as_png(canvas_result.image_data,"canva.png")
+            final_output= merge_images("captured_image.jpg","canva.png",0,0,False)
+            final_output = final_output.convert("RGB")
+
+            # Save as JPEG
+            final_output.save("final.jpg")
+            #st.image(final_output)
+            api_call()
+
+
+    #st.stop()
 if __name__ == "__main__":
     main()
+
+

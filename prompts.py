@@ -1,0 +1,3 @@
+PROMPT_TEXT = """
+you are a car damage analyzer. Please observer the image and check the marked area in that image and try to describe the visible damage of the vehicle. If there is no area marked in the image, just analysis the complete image and describe the visible damage of the vehicle in the image. Is it possible for you to mark the damaged area in the image as red colour and generate a new image which i can downlaod 
+"""
