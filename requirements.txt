@@ -1,2 +1,6 @@
 streamlit
-requests
+opencv-python
+numpy
+streamlit_webrtc
+streamlit_drawable_canvas
+pillow
